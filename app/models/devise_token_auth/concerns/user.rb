@@ -1,15 +1,19 @@
+require 'mongoid-locker'
+
 module DeviseTokenAuth::Concerns::User
   extend ActiveSupport::Concern
 
   included do
+    include Mongoid::Locker
+
     # Hack to check if devise is already enabled
     unless self.method_defined?(:devise_modules)
       devise :database_authenticatable, :registerable,
-          :recoverable, :trackable, :validatable,
-          :confirmable, :omniauthable
+             :recoverable, :trackable, :validatable,
+             :confirmable, :omniauthable
     end
 
-    serialize :tokens, HashWithIndifferentAccess
+    # serialize :tokens, HashWithIndifferentAccess
 
     validates_presence_of :email, if: Proc.new { |u| u.provider == 'email' }
     validates_presence_of :uid, if: Proc.new { |u| u.provider != 'email' }
@@ -18,8 +22,8 @@ module DeviseTokenAuth::Concerns::User
     validate :unique_email_user, on: :create
 
     # can't set default on text fields in mysql, simulate here instead.
-    after_save :set_empty_token_hash
-    after_initialize :set_empty_token_hash
+    # after_save :set_empty_token_hash
+    # after_initialize :set_empty_token_hash
 
     # keep uid in sync with email
     before_save :sync_uid
@@ -102,7 +106,7 @@ module DeviseTokenAuth::Concerns::User
   def token_is_current?(token, client_id)
     return true if (
       # ensure that expiry and token are set
-      self.tokens[client_id]['expiry'] and
+    self.tokens[client_id]['expiry'] and
       self.tokens[client_id]['token'] and
 
       # ensure that the token has not yet expired
@@ -118,7 +122,7 @@ module DeviseTokenAuth::Concerns::User
   def token_can_be_reused?(token, client_id)
     return true if (
       # ensure that the last token and its creation time exist
-      self.tokens[client_id]['updated_at'] and
+    self.tokens[client_id]['updated_at'] and
       self.tokens[client_id]['last_token'] and
 
       # ensure that previous token falls within the batch buffer throttle time of the last request
@@ -132,19 +136,19 @@ module DeviseTokenAuth::Concerns::User
 
   # update user's auth token (should happen on each request)
   def create_new_auth_token(client_id=nil)
-    client_id  ||= SecureRandom.urlsafe_base64(nil, false)
+    client_id ||= SecureRandom.urlsafe_base64(nil, false)
     last_token ||= nil
-    token        = SecureRandom.urlsafe_base64(nil, false)
-    token_hash   = BCrypt::Password.create(token)
-    expiry       = (Time.now + DeviseTokenAuth.token_lifespan).to_i
+    token = SecureRandom.urlsafe_base64(nil, false)
+    token_hash = BCrypt::Password.create(token)
+    expiry = (Time.now + DeviseTokenAuth.token_lifespan).to_i
 
     if self.tokens[client_id] and self.tokens[client_id]['token']
       last_token = self.tokens[client_id]['token']
     end
 
     self.tokens[client_id] = {
-      token:      token_hash,
-      expiry:     expiry,
+      token: token_hash,
+      expiry: expiry,
       last_token: last_token,
       updated_at: Time.now
     }
@@ -164,16 +168,16 @@ module DeviseTokenAuth::Concerns::User
 
     return {
       "access-token" => token,
-      "token-type"   => "Bearer",
-      "client"       => client_id,
-      "expiry"       => expiry,
-      "uid"          => self.uid
+      "token-type" => "Bearer",
+      "client" => client_id,
+      "expiry" => expiry,
+      "uid" => self.uid
     }
   end
 
 
   def build_auth_url(base_url, args)
-    args[:uid]    = self.uid
+    args[:uid] = self.uid
     args[:expiry] = self.tokens[args[:client_id]]['expiry']
 
     generate_url(base_url, args)
@@ -217,16 +221,16 @@ module DeviseTokenAuth::Concerns::User
     end
   end
 
-  def set_empty_token_hash
-    self.tokens ||= {} if has_attribute?(:tokens)
-  end
+  # def set_empty_token_hash
+  #   self.tokens ||= {} if has_attribute?(:tokens)
+  # end
 
   def sync_uid
     self.uid = email if provider == 'email'
   end
 
   def destroy_expired_tokens
-    self.tokens.delete_if{|cid,v|
+    self.tokens.delete_if { |cid, v|
       expiry = v[:expiry] || v["expiry"]
       DateTime.strptime(expiry.to_s, '%s') < Time.now
     }
